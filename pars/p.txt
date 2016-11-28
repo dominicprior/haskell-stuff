@@ -1,18 +1,10 @@
 $foo = 3;  # "hello;"
 
-# if (($x > 0) || $e) {
-#    $a = $b;
-# }
-
 if ($x + ($y + 3) + 4) {
    $a = $b;
 }
-
-$i = 6;
-
 sub sq {
     my ($x) = @_;
     return $x * $x;
 }
-
 my $s = "hi # {} \"hey\"  ";

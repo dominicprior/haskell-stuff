@@ -23,7 +23,6 @@ perlToken =
   try perlMy <|>
   perlVar <|>
   perlOp <|>
-  perlParen <|>
   perlBracket
 
 comment :: P st String
@@ -36,9 +35,9 @@ comment = do
 perlStr :: P st String
 perlStr = do
   char '"'
-  str <- many perlStrChar
+  str <- concatMany perlStrChar
   char '"'
-  return $ '"' : concat str ++ "\""
+  return $ '"' : str ++ "\""
 
 perlStrChar :: P st String
 perlStrChar =
@@ -63,36 +62,11 @@ perlDollarVar = char '$' >> perlVar
 perlMy :: P st String
 perlMy = string "my" >> spaces >> return ""
 
-perlParen :: P st String
-perlParen = do
-  char '(' >> spaces
-  expr <- perlExpr
-  spaces >> char ')'
-  return $ "(" ++ expr ++ ")"
-
 perlVar :: P st String
 perlVar = many1 $ oneOf $ ['a'..'z'] ++ ['A'..'Z'] ++ ['0'..'9'] ++ "_"
 
 perlOp :: P st String
 perlOp = many1 $ oneOf "%^&*-+=.|<>~/"
-
-perlExpr :: P st String
-perlExpr = do
-  t1 <- perlTerm
-  spaces
-  m <- many $ do
-    op <- perlOp
-    spaces
-    t2 <- perlTerm
-    spaces
-    return $ op ++ " " ++ t2
-  return $ t1 ++ concat m
-
-perlTerm :: P st String
-perlTerm = perlLeaf <|> perlParen
-
-perlLeaf :: P st String
-perlLeaf = perlDollarVar <|> perlVar
 
 perlBracket :: P st String
 perlBracket = (:[]) <$> oneOf "[]"
@@ -106,6 +80,39 @@ perlSub = do
   args <- perlDollarVar `sepBy1` (char ',' >> spaces)
   char ')' >> spaces >> char '=' >> spaces >> string "@_;\n"
   return $ "def " ++ name ++ "(" ++ intercalate ", " args ++ "):\n"
+
+concatMany :: P st [a] -> P st [a]
+concatMany = fmap concat . many
+
+(<++>) :: P st [a] -> P st [a] -> P st [a]
+p <++> q = (++) <$> p <*> q
+infixl 5 <++>
+
+stmt :: P st String
+stmt = tern <++> (concatMany $ ass <++> tern)
+
+tern :: P st String
+tern = do
+  e <- expr
+  option e $ do
+    th  <- char '?' >> tern
+    els <- char ':' >> tern
+    return $ th ++ " if " ++ e ++ " else " ++ els
+
+expr :: P st String
+expr = concatMany perlTok
+
+perlTok :: P st String
+perlTok =
+  string "(" <++> stmt <++> string ")" <|>
+  many1 space <|>
+  comment <|>
+  perlStr <|>
+  perlVar
+
+
+ass :: P st String
+ass = (:[]) <$> oneOf "=,"
 
 t p = parse p ""
 fromRight (Right x) = x
