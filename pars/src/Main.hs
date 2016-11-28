@@ -8,22 +8,8 @@ type P st t = Parsec String st t
 main = do
   putStrLn "hello world"
 
-
-perlTokens :: P st [String]
-perlTokens = many perlToken
-
-perlToken :: P st String
-perlToken =
-  many1 space <|>
-  comment <|>
-  perlStr <|>
-  dollarBraceSemicolon <|>
-  try perlIf <|>
-  try perlSub <|>
-  try perlMy <|>
-  perlVar <|>
-  perlOp <|>
-  perlBracket
+perlProg :: P st String
+perlProg = concatMany stmt
 
 comment :: P st String
 comment = do
@@ -46,21 +32,16 @@ perlStrChar =
 twoChars :: Char -> Char -> String
 twoChars a b = [a, b]
 
-dollarBraceSemicolon :: P st String
-dollarBraceSemicolon = oneOf "${};" >> return ""
-
 perlIf :: P st String
 perlIf = do
-  string "if" >> spaces >> char '('
-  toks <- perlTokens
-  char ')' >> spaces >> char '{'
-  return $ "if " ++ concat toks ++ ":"
+  e <- try (string "if") >> spaces >> char '(' >> expr <* char ')'
+  return $ "if " ++ e ++ ":"
 
 perlDollarVar :: P st String
 perlDollarVar = char '$' >> perlVar
 
 perlMy :: P st String
-perlMy = string "my" >> spaces >> return ""
+perlMy = try (string "my") >> spaces >> return ""
 
 perlVar :: P st String
 perlVar = many1 $ oneOf $ ['a'..'z'] ++ ['A'..'Z'] ++ ['0'..'9'] ++ "_"
@@ -73,8 +54,7 @@ perlBracket = (:[]) <$> oneOf "[]"
 
 perlSub :: P st String
 perlSub = do
-  string "sub" >> spaces
-  name <- perlVar
+  name <- try (string "sub") >> spaces >> perlVar
   spaces >> char '{' >> spaces
   string "my" >> spaces >> char '('
   args <- perlDollarVar `sepBy1` (char ',' >> spaces)
@@ -84,12 +64,19 @@ perlSub = do
 concatMany :: P st [a] -> P st [a]
 concatMany = fmap concat . many
 
+concatMany1 :: P st [a] -> P st [a]
+concatMany1 = fmap concat . many1
+
 (<++>) :: P st [a] -> P st [a] -> P st [a]
 p <++> q = (++) <$> p <*> q
 infixl 5 <++>
 
 stmt :: P st String
-stmt = tern <++> (concatMany $ ass <++> tern)
+stmt =
+  perlSub <|>
+  perlIf <|>
+  tern <++> (concatMany $ ass <++> tern) <|>
+  (oneOf ";{}" >> return "")
 
 tern :: P st String
 tern = do
@@ -100,15 +87,25 @@ tern = do
     return $ th ++ " if " ++ e ++ " else " ++ els
 
 expr :: P st String
-expr = concatMany perlTok
+expr = concatMany1 perlTok
 
 perlTok :: P st String
 perlTok =
   string "(" <++> stmt <++> string ")" <|>
+  perlMy <|>
   many1 space <|>
   comment <|>
   perlStr <|>
-  perlVar
+  perlOp <|>
+  (char '$' >> return "") <|>
+  try perlVarNoSub
+
+perlVarNoSub :: P st String
+perlVarNoSub = do
+  v <- perlVar
+  if (v == "sub")
+  then parserZero
+  else return v
 
 
 ass :: P st String
@@ -118,11 +115,11 @@ t p = parse p ""
 fromRight (Right x) = x
 tt = do
   str <- readFile "p.txt"
-  putStr $ concat $ fromRight $ t perlTokens str
+  putStr $ fromRight $ t perlProg str
 
 ss = do
   str <- readFile "p.txt"
-  print $ t perlTokens str
+  print $ t perlProg str
 
 
 
