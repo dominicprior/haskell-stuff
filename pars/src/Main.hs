@@ -47,7 +47,7 @@ perlVar :: P st String
 perlVar = many1 $ oneOf $ ['a'..'z'] ++ ['A'..'Z'] ++ ['0'..'9'] ++ "_"
 
 perlOp :: P st String
-perlOp = many1 $ oneOf "%^&*-+=.|<>~/"
+perlOp = many1 $ oneOf "%^&*-+.|<>~/"
 
 perlBracket :: P st String
 perlBracket = (:[]) <$> oneOf "[]"
