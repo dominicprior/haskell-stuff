@@ -19,14 +19,15 @@ comment = do
   return $ '#' : str ++ "\n"
 
 normalStr :: P st String
-normalStr = enc '"' <$> (char '"' >> strInnards c <* char '"')
+normalStr = enc '"' <$> (char '"' >> strInnards '"' <* char '"')
 
 strInnards :: Char -> P st String
-strInnards c = char '"' >> concatMany $ perlStrChar c <* char '"'
+strInnards c = concatMany $ perlStrChar c
 
 perlStrChar :: Char -> P st String
 perlStrChar c =
-  (twoChars <$> char '\\' <*> anyChar) <|> (:[]) <$> noneOf c
+  (twoChars <$> char '\\' <*> anyChar) <|>
+  (:[]) <$> noneOf [c]
 
 twoChars :: Char -> Char -> String
 twoChars a b = [a, b]
@@ -134,13 +135,12 @@ perlTok =
   try perlOpNoAss <|>
   (char '$' >> return "") <|>
   try perlVarNoSub <|>
-  tryStr "=~" >> spaces >> regexpMatch
+  (tryStr "=~" >> spaces >> regexpMatch)
 
 regexpMatch :: P st String
 regexpMatch =
-  --(char '/' >> regexpMatch' '/') <|>
-  undefined
-  --((char 'm' >> anyChar) >>= regexpMatch')
+  (char '/' >> regexpMatch' '/') <|>
+  ((char 'm' >> anyChar) >>= regexpMatch')
 
 regexpMatch' :: Char -> P st String
 regexpMatch' c = do
@@ -150,7 +150,7 @@ regexpMatch' c = do
 perlVarNoSub :: P st String
 perlVarNoSub = do
   v <- perlVar
-  if (v == "sub")
+  if elem v ["sub", "if"]
   then parserZero
   else return v
 

@@ -10,3 +10,7 @@ sub sq {
     return $x * $x;
 }
 my $s = "hi # {} \"hey\"  ";
+
+if ($k =~ /foo/ || $w =~ m,zzz,) {
+    $u .= "aa";
+}
