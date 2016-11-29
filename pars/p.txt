@@ -14,3 +14,7 @@ my $s = "hi # {} \"hey\"  ";
 if ($k =~ /foo/ || $w =~ m,zzz,) {
     $u .= "aa";
 }
+else {
+    for my $x (@a) {
+        f($x);
+}

@@ -32,10 +32,16 @@ perlStrChar c =
 twoChars :: Char -> Char -> String
 twoChars a b = [a, b]
 
-perlIf :: P st String
-perlIf = do
-  e <- tryStr "if" >> spaces >> char '(' >> expr <* char ')'
-  return $ "if " ++ e ++ ":"
+perlIf :: String -> String -> P st String
+perlIf a b = do
+  e <- tryStr a >> spaces >> char '(' >> expr <* char ')'
+  return $ b ++ " " ++ e ++ ":"
+
+perlFor :: P st String
+perlFor = do
+  x <- tryStr "for" >> spaces >> string "my" >> spaces >> perlDollarVar
+  a <- spaces >> char '(' >> expr <* char ')'
+  return $ "for " ++ x ++ " in " ++ a ++ ":"
 
 perlDollarVar :: P st String
 perlDollarVar = char '$' >> perlVar
@@ -107,7 +113,11 @@ infixl 5 <++>
 stmt :: P st String
 stmt =
   perlSub <|>
-  perlIf <|>
+  perlIf "if" "if" <|>
+  perlIf "elsif" "elif" <|>
+  perlIf "while" "while" <|>
+  perlFor <|>
+  (tryStr "else" >> return "else:") <|>
   tern <++> (concatMany $ ass <++> tern) <|>
   (oneOf ";{}" >> return "")
 
@@ -133,7 +143,7 @@ perlTok =
   comment <|>
   normalStr <|>
   try perlOpNoAss <|>
-  (char '$' >> return "") <|>
+  (oneOf "$@" >> return "") <|>
   try perlVarNoSub <|>
   (tryStr "=~" >> spaces >> regexpMatch)
 
@@ -150,7 +160,7 @@ regexpMatch' c = do
 perlVarNoSub :: P st String
 perlVarNoSub = do
   v <- perlVar
-  if elem v ["sub", "if"]
+  if elem v ["sub", "if", "for", "while", "else", "elsif"]
   then parserZero
   else return v
 
