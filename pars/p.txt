@@ -1,12 +1,12 @@
 $foo = 3;  # "hello;"
 
-if ($x + ($y + 3) + 4) {
+if ($x + ($y . 3) - 4) {
    $a = $b;
 }
 
 sub sq {
     my ($x) = @_;
-    my $k = $a ? $b : 4;
+    $k += $a ? $b : 4;
     return $x * $x;
 }
 my $s = "hi # {} \"hey\"  ";

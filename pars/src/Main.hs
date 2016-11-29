@@ -34,27 +34,54 @@ twoChars a b = [a, b]
 
 perlIf :: P st String
 perlIf = do
-  e <- try (string "if") >> spaces >> char '(' >> expr <* char ')'
+  e <- tryStr "if" >> spaces >> char '(' >> expr <* char ')'
   return $ "if " ++ e ++ ":"
 
 perlDollarVar :: P st String
 perlDollarVar = char '$' >> perlVar
 
 perlMy :: P st String
-perlMy = try (string "my") >> spaces >> return ""
+perlMy = tryStr "my" >> spaces >> return ""
 
 perlVar :: P st String
 perlVar = many1 $ oneOf $ ['a'..'z'] ++ ['A'..'Z'] ++ ['0'..'9'] ++ "_"
 
-perlOp :: P st String
-perlOp = many1 $ oneOf "%^&*-+.|<>~/"
+normalOps = ["&&", "||", "//", "<<", ">>", "+","-", "*", "/", "%", "&", "|", "^"]
+assOps = map (++ "=") normalOps
+
+matchAny :: [String] -> P st String
+matchAny = foldr1 (<|>) . map tryStr
+
+perlOpNoAss' :: P st String
+perlOpNoAss' =
+  matchAny assOps <|> tryStr ".=" <|>
+  matchAny ["<=", ">=", "==", "!=", "<<", ">>", "**"] <|>
+  (tryStr "&&" >> return "and") <|>
+  (tryStr "||" >> return "or")  <|>
+  (tryStr "!"  >> return "not") <|>
+  (tryStr "."  >> return "+")   <|>
+  matchAny normalOps
+
+perlOpNoAss :: P st String
+perlOpNoAss = do
+  op <- perlOpNoAss'
+  if elem op assOps || op == ".="
+  then parserZero
+  else return op
+
+ass :: P st String
+ass =
+  matchAny assOps <|>
+  (tryStr ".=" >> return "+=") <|>
+  strOneOf "=,"    
+
 
 perlBracket :: P st String
-perlBracket = (:[]) <$> oneOf "[]"
+perlBracket = strOneOf "[]"
 
 perlSub :: P st String
 perlSub = do
-  name <- try (string "sub") >> spaces >> perlVar
+  name <- tryStr "sub" >> spaces >> perlVar
   spaces >> char '{' >> spaces
   string "my" >> spaces >> char '('
   args <- perlDollarVar `sepBy1` (char ',' >> spaces)
@@ -66,6 +93,12 @@ concatMany = fmap concat . many
 
 concatMany1 :: P st [a] -> P st [a]
 concatMany1 = fmap concat . many1
+
+tryStr :: String -> P st String
+tryStr = try . string
+
+strOneOf :: String -> P st String
+strOneOf = fmap (:[]) . oneOf
 
 (<++>) :: P st [a] -> P st [a] -> P st [a]
 p <++> q = (++) <$> p <*> q
@@ -96,7 +129,7 @@ perlTok =
   many1 space <|>
   comment <|>
   perlStr <|>
-  perlOp <|>
+  try perlOpNoAss <|>
   (char '$' >> return "") <|>
   try perlVarNoSub
 
@@ -107,9 +140,6 @@ perlVarNoSub = do
   then parserZero
   else return v
 
-
-ass :: P st String
-ass = (:[]) <$> oneOf "=,"
 
 t p = parse p ""
 fromRight (Right x) = x
