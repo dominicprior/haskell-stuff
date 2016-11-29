@@ -18,16 +18,15 @@ comment = do
   char '\n'
   return $ '#' : str ++ "\n"
 
-perlStr :: P st String
-perlStr = do
-  char '"'
-  str <- concatMany perlStrChar
-  char '"'
-  return $ '"' : str ++ "\""
+normalStr :: P st String
+normalStr = enc '"' <$> (char '"' >> strInnards c <* char '"')
 
-perlStrChar :: P st String
-perlStrChar =
-  (twoChars <$> char '\\' <*> anyChar) <|> (:[]) <$> noneOf "\""
+strInnards :: Char -> P st String
+strInnards c = char '"' >> concatMany $ perlStrChar c <* char '"'
+
+perlStrChar :: Char -> P st String
+perlStrChar c =
+  (twoChars <$> char '\\' <*> anyChar) <|> (:[]) <$> noneOf c
 
 twoChars :: Char -> Char -> String
 twoChars a b = [a, b]
@@ -122,16 +121,31 @@ tern = do
 expr :: P st String
 expr = concatMany1 perlTok
 
+enc :: Char -> String -> String
+enc c s = c : s ++ [c]
+
 perlTok :: P st String
 perlTok =
   string "(" <++> stmt <++> string ")" <|>
   perlMy <|>
   many1 space <|>
   comment <|>
-  perlStr <|>
+  normalStr <|>
   try perlOpNoAss <|>
   (char '$' >> return "") <|>
-  try perlVarNoSub
+  try perlVarNoSub <|>
+  tryStr "=~" >> spaces >> regexpMatch
+
+regexpMatch :: P st String
+regexpMatch =
+  --(char '/' >> regexpMatch' '/') <|>
+  undefined
+  --((char 'm' >> anyChar) >>= regexpMatch')
+
+regexpMatch' :: Char -> P st String
+regexpMatch' c = do
+  s <- strInnards c <* char c
+  return $ ".match(" ++ s ++ ")"
 
 perlVarNoSub :: P st String
 perlVarNoSub = do
