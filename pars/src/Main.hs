@@ -18,8 +18,8 @@ comment = do
   char '\n'
   return $ '#' : str ++ "\n"
 
-normalStr :: P st String
-normalStr = enc '"' <$> (char '"' >> strInnards '"' <* char '"')
+normalStr :: Char -> P st String
+normalStr c = enc c <$> (char c >> strInnards c <* char c)
 
 strInnards :: Char -> P st String
 strInnards c = concatMany $ perlStrChar c
@@ -56,7 +56,7 @@ perlFor = do
 
 perlEnv :: P st String
 perlEnv = do
-  x <- string "ENV{" >> many (letter <|> digit <|> char '_') <* char '}'
+  x <- string "ENV{" >> many idChar <* char '}'
   return $ "os.environ['" ++ x ++ "']"
 
 perlDollarVar :: P st String
@@ -66,7 +66,7 @@ perlMy :: P st String
 perlMy = tryStr "my" >> spaces >> return ""
 
 perlVar :: P st String
-perlVar = many1 $ oneOf $ ['a'..'z'] ++ ['A'..'Z'] ++ ['0'..'9'] ++ "_"
+perlVar = many1 idChar
 
 normalOps = ["&&", "||", "//", "<<", ">>", "+","-", "*", "/", "%", "&", "|", "^"]
 assOps = map (++ "=") normalOps
@@ -149,7 +149,8 @@ stmt =
   (tryStr "else" >> return "else:") <|>
   tern <++> (concatMany $ ass <++> tern) <|>
   (oneOf ";{}" >> return "") <|>
-  (tryStr "use" >> many (noneOf "\n") >> char '\n' >> return "")
+  (tryStr "use" >> many (noneOf "\n") >> char '\n' >> return "") <|>
+  return ""
 
 tern :: P st String
 tern = do
@@ -170,23 +171,36 @@ perlTok =
   string "(" <++> stmt <++> string ")" <|>
   perlMy <|>
   many1 space <|>
+  perlqw <|>
   perlEnv <|>
   comment <|>
-  normalStr <|>
+  normalStr '"' <|>
+  normalStr '\'' <|>
+  (tryStr "!~" >> spaces >> regexpMatch "nomatch") <|>
   try perlOpNoAss <|>
   (oneOf "$@" >> return "") <|>
   try perlVarNoSub <|>
-  (tryStr "=~" >> spaces >> regexpMatch)
+  (tryStr "=~" >> spaces >> regexpMatch "match")
 
-regexpMatch :: P st String
-regexpMatch =
-  (char '/' >> regexpMatch' '/') <|>
-  ((char 'm' >> anyChar) >>= regexpMatch')
+perlqw :: P st String
+perlqw = do
+  tryStr "qw" >> spaces >> char '('
+  a <- perlVar `sepBy` (many1 space)
+  return $ "[" ++ (intercalate ", " a) ++ "]"
 
-regexpMatch' :: Char -> P st String
-regexpMatch' c = do
+
+idChar :: P st Char
+idChar = letter <|> digit <|> char '_'
+
+regexpMatch :: String -> P st String
+regexpMatch str =
+  (char '/' >> regexpMatch' str '/') <|>
+  ((char 'm' >> anyChar) >>= regexpMatch' str)
+
+regexpMatch' :: String -> Char -> P st String
+regexpMatch' str c = do
   s <- strInnards c <* char c
-  return $ ".match(" ++ s ++ ")"
+  return $ "." ++ str ++ "(" ++ s ++ ")"
 
 perlVarNoSub :: P st String
 perlVarNoSub = do
