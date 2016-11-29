@@ -11,10 +11,12 @@ sub sq {
 }
 my $s = "hi # {} \"hey\"  ";
 
-if ($k =~ /foo/ || $w =~ m,zzz,) {
+if ($k =~ /foo/ || $w =~ m,zzz, || $u eq $v) {
     $u .= "aa";
+    system_or_die "foo";
+    print $j;
 }
 else {
     for my $x (@a) {
-        f($x);
+        push @b, f($x);
 }

@@ -37,14 +37,30 @@ perlIf a b = do
   e <- tryStr a >> spaces >> char '(' >> expr <* char ')'
   return $ b ++ " " ++ e ++ ":"
 
+perlPrint :: String -> P st String
+perlPrint str = do
+  e <- tryStr str >> spaces >> expr
+  return $ str ++ "(" ++ e ++ ")"
+
+perlPush :: P st String
+perlPush = do
+  a <- tryStr "push" >> spaces >> perlDollarVar <* char ',' <* spaces
+  x <- expr
+  return $ a ++ ".append(" ++ x ++ ")"
+
 perlFor :: P st String
 perlFor = do
   x <- tryStr "for" >> spaces >> string "my" >> spaces >> perlDollarVar
   a <- spaces >> char '(' >> expr <* char ')'
   return $ "for " ++ x ++ " in " ++ a ++ ":"
 
+perlEnv :: P st String
+perlEnv = do
+  x <- string "ENV{" >> many (letter <|> digit <|> char '_') <* char '}'
+  return $ "os.environ['" ++ x ++ "']"
+
 perlDollarVar :: P st String
-perlDollarVar = char '$' >> perlVar
+perlDollarVar = oneOf "@$" >> perlVar
 
 perlMy :: P st String
 perlMy = tryStr "my" >> spaces >> return ""
@@ -65,6 +81,12 @@ perlOpNoAss' =
   (tryStr "&&" >> return "and") <|>
   (tryStr "||" >> return "or")  <|>
   (tryStr "!"  >> return "not") <|>
+  (tryStr "eq" >> return "==")  <|>
+  (tryStr "ne" >> return "!=")  <|>
+  (tryStr "ge" >> return ">=")  <|>
+  (tryStr "le" >> return "<=")  <|>
+  (tryStr "gt" >> return ">")  <|>
+  (tryStr "lt" >> return "<")  <|>
   (tryStr "."  >> return "+")   <|>
   matchAny normalOps
 
@@ -81,7 +103,6 @@ ass =
   (tryStr ".=" >> return "+=") <|>
   strOneOf "=,"    
 
-
 perlBracket :: P st String
 perlBracket = strOneOf "[]"
 
@@ -89,6 +110,10 @@ perlSub :: P st String
 perlSub = do
   name <- tryStr "sub" >> spaces >> perlVar
   spaces >> char '{' >> spaces
+  try (perlSubWithArgs name) <|> (return $ "def " ++ name ++ "():\n")
+
+perlSubWithArgs :: String -> P st String
+perlSubWithArgs name = do
   string "my" >> spaces >> char '('
   args <- perlDollarVar `sepBy1` (char ',' >> spaces)
   char ')' >> spaces >> char '=' >> spaces >> string "@_;\n"
@@ -117,9 +142,14 @@ stmt =
   perlIf "elsif" "elif" <|>
   perlIf "while" "while" <|>
   perlFor <|>
+  perlPrint "print" <|>
+  perlPrint "system_or_die" <|>
+  perlPrint "chdir_or_die" <|>
+  perlPush <|>
   (tryStr "else" >> return "else:") <|>
   tern <++> (concatMany $ ass <++> tern) <|>
-  (oneOf ";{}" >> return "")
+  (oneOf ";{}" >> return "") <|>
+  (tryStr "use" >> many (noneOf "\n") >> char '\n' >> return "")
 
 tern :: P st String
 tern = do
@@ -140,6 +170,7 @@ perlTok =
   string "(" <++> stmt <++> string ")" <|>
   perlMy <|>
   many1 space <|>
+  perlEnv <|>
   comment <|>
   normalStr <|>
   try perlOpNoAss <|>
@@ -160,19 +191,21 @@ regexpMatch' c = do
 perlVarNoSub :: P st String
 perlVarNoSub = do
   v <- perlVar
-  if elem v ["sub", "if", "for", "while", "else", "elsif"]
+  if elem v $ printOps ++ ["sub", "if", "for", "while", "else", "elsif",
+                           "push", "use"]
   then parserZero
   else return v
 
+printOps = ["print", "system_or_die", "chdir_or_die"]
 
 t p = parse p ""
 fromRight (Right x) = x
 tt = do
-  str <- readFile "p.txt"
+  str <- readFile "p.pl"
   putStr $ fromRight $ t perlProg str
 
 ss = do
-  str <- readFile "p.txt"
+  str <- readFile "p.pl"
   print $ t perlProg str
 
 
