@@ -149,8 +149,7 @@ stmt =
   (tryStr "else" >> return "else:") <|>
   tern <++> (concatMany $ ass <++> tern) <|>
   (oneOf ";{}" >> return "") <|>
-  (tryStr "use" >> many (noneOf "\n") >> char '\n' >> return "") <|>
-  return ""
+  (tryStr "use" >> many (noneOf "\n") >> char '\n' >> return "")
 
 tern :: P st String
 tern = do
@@ -168,6 +167,7 @@ enc c s = c : s ++ [c]
 
 perlTok :: P st String
 perlTok =
+  tryStr "()" <|>
   string "(" <++> stmt <++> string ")" <|>
   perlMy <|>
   many1 space <|>
@@ -185,8 +185,8 @@ perlTok =
 perlqw :: P st String
 perlqw = do
   tryStr "qw" >> spaces >> char '('
-  a <- perlVar `sepBy` (many1 space)
-  return $ "[" ++ (intercalate ", " a) ++ "]"
+  a <- perlVar `sepEndBy` (many1 space) <* char ')'
+  return $ "[" ++ (intercalate ", " $ map (enc '\'') a) ++ "]"
 
 
 idChar :: P st Char
