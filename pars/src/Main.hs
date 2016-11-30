@@ -3,28 +3,29 @@
 import Text.Parsec
 import Data.List (intercalate)
 
-type P st t = Parsec String st t
+type P = Parsec String () String
+type PP a = Parsec String () a
 
 main = do
   putStrLn "hello world"
 
-perlProg :: P st String
+perlProg :: P
 perlProg = concatMany stmt
 
-comment :: P st String
+comment :: P
 comment = do
   char '#'
   str <- many $ noneOf "\n"
   char '\n'
   return $ '#' : str ++ "\n"
 
-normalStr :: Char -> P st String
+normalStr :: Char -> P
 normalStr c = enc c <$> (char c >> strInnards c)
 
-strInnards :: Char -> P st String
+strInnards :: Char -> P
 strInnards c = concatMany (perlStrChar c) <* char c
 
-perlStrChar :: Char -> P st String
+perlStrChar :: Char -> P
 perlStrChar c =
   (twoChars <$> char '\\' <*> anyChar) <|>
   (:[]) <$> noneOf [c]
@@ -32,35 +33,35 @@ perlStrChar c =
 twoChars :: Char -> Char -> String
 twoChars a b = [a, b]
 
-perlIf :: String -> String -> P st String
+perlIf :: String -> String -> P
 perlIf a b = do
   e <- tryStr a >> spaces >> char '(' >> expr <* char ')'
   return $ b ++ " " ++ e ++ ":"
 
-perlPrint :: String -> P st String
+perlPrint :: String -> P
 perlPrint str = do
   e <- tryStr str >> spaces >> expr
   return $ str ++ "(" ++ e ++ ")"
 
-perlPush :: P st String
+perlPush :: P
 perlPush = do
   a <- tryStr "push" >> spaces >> perlDollarVar <* char ',' <* spaces
   x <- tern
   return $ a ++ ".append(" ++ x ++ ")"
 
-perlSplit :: P st String
+perlSplit :: P
 perlSplit = do
   r <- tryStr "split" >> spaces >> char '/' >> strInnards '/' <* char ',' <* spaces
   x <- tern
   return $ "re.split(" ++ x ++ ", \"" ++ r ++ "\")"
 
-perlFor :: P st String
+perlFor :: P
 perlFor = do
   x <- tryStr "for" >> spaces >> string "my" >> spaces >> perlDollarVar
   a <- spaces >> char '(' >> stmt <* char ')'
   return $ "for " ++ x ++ " in " ++ a ++ ":"
 
-perlEnv :: P st String
+perlEnv :: P
 perlEnv =
   tryStr "ENV{" >> (
     (
@@ -72,22 +73,22 @@ perlEnv =
     )
   )
 
-perlDollarVar :: P st String
+perlDollarVar :: P
 perlDollarVar = many1 (oneOf "@$") >> perlVar
 
-perlMy :: P st String
+perlMy :: P
 perlMy = tryStr "my" >> spaces >> return ""
 
-perlVar :: P st String
+perlVar :: P
 perlVar = many1 idChar
 
 normalOps = ["&&", "||", "//", "<<", ">>", "+","-", "*", "/", "%", "&", "|", "^"]
 assOps = map (++ "=") normalOps
 
-matchAny :: [String] -> P st String
+matchAny :: [String] -> P
 matchAny = foldr1 (<|>) . map tryStr
 
-perlOpNoAss' :: P st String
+perlOpNoAss' :: P
 perlOpNoAss' =
   matchAny assOps <|> tryStr ".=" <|>
   matchAny ["<=", ">=", "==", "!=", "<<", ">>", "**"] <|>
@@ -100,53 +101,53 @@ perlOpNoAss' =
   matchAny normalOps <|>
   matchAny ["[", "]", "<", ">"]
 
-perlOpNoAss :: P st String
+perlOpNoAss :: P
 perlOpNoAss = do
   op <- perlOpNoAss'
   if elem op assOps || op == ".="
   then parserZero
   else return op
 
-ass :: P st String
+ass :: P
 ass =
   matchAny assOps <|>
   (tryStr ".=" >> return "+=") <|>
   strOneOf "=,"    
 
-perlBracket :: P st String
+perlBracket :: P
 perlBracket = strOneOf "[]"
 
-perlSub :: P st String
+perlSub :: P
 perlSub = do
   name <- tryStr "sub" >> spaces >> perlVar
   (char ';' >> return "") <|> do
     spaces >> char '{'
     try (spaces >> perlSubWithArgs name) <|> (return $ "def " ++ name ++ "():\n")
 
-perlSubWithArgs :: String -> P st String
+perlSubWithArgs :: String -> P
 perlSubWithArgs name = do
   string "my" >> spaces >> char '('
   args <- perlDollarVar `sepBy1` (char ',' >> spaces)
   char ')' >> spaces >> char '=' >> spaces >> string "@_;\n"
   return $ "def " ++ name ++ "(" ++ intercalate ", " args ++ "):\n"
 
-concatMany :: P st [a] -> P st [a]
+concatMany :: PP [a] -> PP [a]
 concatMany = fmap concat . many
 
-concatMany1 :: P st [a] -> P st [a]
+concatMany1 :: PP [a] -> PP [a]
 concatMany1 = fmap concat . many1
 
-tryStr :: String -> P st String
+tryStr :: String -> P
 tryStr = try . string
 
-strOneOf :: String -> P st String
+strOneOf :: String -> P
 strOneOf = fmap (:[]) . oneOf
 
-(<++>) :: P st [a] -> P st [a] -> P st [a]
+(<++>) :: PP [a] -> PP [a] -> PP [a]
 p <++> q = (++) <$> p <*> q
 infixl 5 <++>
 
-stmt :: P st String
+stmt :: P
 stmt =
   perlSub <|>
   perlIf "if" "if" <|>
@@ -164,7 +165,7 @@ stmt =
   (oneOf ";{}" >> return "") <|>
   (tryStr "use" >> many (noneOf "\n") >> char '\n' >> return "")
 
-tern :: P st String
+tern :: P
 tern = do
   e <- expr
   option e $ do
@@ -172,7 +173,7 @@ tern = do
     els <- char ':' >> tern
     return $ th ++ " if " ++ e ++ " else " ++ els
 
-expr :: P st String
+expr :: P
 expr = concatMany1 perlTok
 
 enc :: Char -> String -> String
@@ -181,7 +182,7 @@ enc c s = c : s ++ [c]
 enc2 :: String -> String -> String -> String
 enc2 beg end str = beg ++ str ++ end
 
-perlTok :: P st String
+perlTok :: P
 perlTok =
   tryStr "()" <|>
   string "(" <++> stmt <++> string ")" <|>
@@ -199,33 +200,33 @@ perlTok =
   try perlVarNoSub <|>
   (tryStr "=~" >> spaces >> regexpMatch "match")
 
-perlqw :: P st String
+perlqw :: P
 perlqw = do
   tryStr "qw" >> spaces >> char '('
   a <- perlVar `sepEndBy` (many1 space) <* char ')'
   return $ "[" ++ (intercalate ", " $ map (enc '\'') a) ++ "]"
 
-perlqq :: P st String
+perlqq :: P
 perlqq = do
   tryStr "qq" >> spaces >> char '('
   strInnards ')' >>= return . enc2 "qq(\"" "\")"
 
 
-idChar :: P st Char
+idChar :: PP Char
 idChar = letter <|> digit <|> char '_'
 
-regexpMatch :: String -> P st String
+regexpMatch :: String -> P
 regexpMatch str =
   (char '/' >> regexpMatch' str '/') <|>
   ((char 'm' >> anyChar) >>= regexpMatch' str) <|>
   ((char 's' >> anyChar) >>= regexpSubst)
 
-regexpMatch' :: String -> Char -> P st String
+regexpMatch' :: String -> Char -> P
 regexpMatch' str c = do
   s <- strInnards c
   return $ "." ++ str ++ "(" ++ enc '"' s ++ ")"
 
-regexpSubst :: Char -> P st String
+regexpSubst :: Char -> P
 regexpSubst '(' = regexpSubst' ')'
 regexpSubst '[' = regexpSubst' ']'
 regexpSubst '{' = regexpSubst' '}'
@@ -234,7 +235,7 @@ regexpSubst c = do
   s2 <- strInnards c
   return $ ".sub(" ++ enc '"' s1 ++ ", " ++ enc '"' s2 ++ ")"
 
-regexpSubst' :: Char -> P st String
+regexpSubst' :: Char -> P
 regexpSubst' end = do
   s1 <- strInnards end
   beg2 <- spaces >> anyChar
@@ -245,7 +246,7 @@ oppositeBracket '(' = ')'
 oppositeBracket '[' = ']'
 oppositeBracket '{' = '}'
 
-perlVarNoSub :: P st String
+perlVarNoSub :: P
 perlVarNoSub = do
   v <- perlVar
   if elem v $ printOps ++ ["sub", "if", "for", "while", "else", "elsif",
