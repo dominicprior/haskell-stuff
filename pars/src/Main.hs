@@ -19,10 +19,10 @@ comment = do
   return $ '#' : str ++ "\n"
 
 normalStr :: Char -> P st String
-normalStr c = enc c <$> (char c >> strInnards c <* char c)
+normalStr c = enc c <$> (char c >> strInnards c)
 
 strInnards :: Char -> P st String
-strInnards c = concatMany $ perlStrChar c
+strInnards c = concatMany (perlStrChar c) <* char c
 
 perlStrChar :: Char -> P st String
 perlStrChar c =
@@ -45,22 +45,35 @@ perlPrint str = do
 perlPush :: P st String
 perlPush = do
   a <- tryStr "push" >> spaces >> perlDollarVar <* char ',' <* spaces
-  x <- expr
+  x <- tern
   return $ a ++ ".append(" ++ x ++ ")"
+
+perlSplit :: P st String
+perlSplit = do
+  r <- tryStr "split" >> spaces >> char '/' >> strInnards '/' <* char ',' <* spaces
+  x <- tern
+  return $ "re.split(" ++ x ++ ", \"" ++ r ++ "\")"
 
 perlFor :: P st String
 perlFor = do
   x <- tryStr "for" >> spaces >> string "my" >> spaces >> perlDollarVar
-  a <- spaces >> char '(' >> expr <* char ')'
+  a <- spaces >> char '(' >> stmt <* char ')'
   return $ "for " ++ x ++ " in " ++ a ++ ":"
 
 perlEnv :: P st String
-perlEnv = do
-  x <- string "ENV{" >> many idChar <* char '}'
-  return $ "os.environ['" ++ x ++ "']"
+perlEnv =
+  tryStr "ENV{" >> (
+    (
+      (many idChar <* char '}') >>= return . enc2 "os.environ['" "']"
+    )
+   <|>
+    (
+      (expr <* char '}') >>= return . enc2 "os.environ[" "]"
+    )
+  )
 
 perlDollarVar :: P st String
-perlDollarVar = oneOf "@$" >> perlVar
+perlDollarVar = many1 (oneOf "@$") >> perlVar
 
 perlMy :: P st String
 perlMy = tryStr "my" >> spaces >> return ""
@@ -78,17 +91,14 @@ perlOpNoAss' :: P st String
 perlOpNoAss' =
   matchAny assOps <|> tryStr ".=" <|>
   matchAny ["<=", ">=", "==", "!=", "<<", ">>", "**"] <|>
+  (tryStr "++" >> return " += 1") <|>
   (tryStr "&&" >> return "and") <|>
   (tryStr "||" >> return "or")  <|>
+  (tryStr "=>" >> return ":")  <|>
   (tryStr "!"  >> return "not") <|>
-  (tryStr "eq" >> return "==")  <|>
-  (tryStr "ne" >> return "!=")  <|>
-  (tryStr "ge" >> return ">=")  <|>
-  (tryStr "le" >> return "<=")  <|>
-  (tryStr "gt" >> return ">")  <|>
-  (tryStr "lt" >> return "<")  <|>
   (tryStr "."  >> return "+")   <|>
-  matchAny normalOps
+  matchAny normalOps <|>
+  matchAny ["[", "]", "<", ">"]
 
 perlOpNoAss :: P st String
 perlOpNoAss = do
@@ -109,8 +119,9 @@ perlBracket = strOneOf "[]"
 perlSub :: P st String
 perlSub = do
   name <- tryStr "sub" >> spaces >> perlVar
-  spaces >> char '{' >> spaces
-  try (perlSubWithArgs name) <|> (return $ "def " ++ name ++ "():\n")
+  (char ';' >> return "") <|> do
+    spaces >> char '{'
+    try (spaces >> perlSubWithArgs name) <|> (return $ "def " ++ name ++ "():\n")
 
 perlSubWithArgs :: String -> P st String
 perlSubWithArgs name = do
@@ -145,7 +156,9 @@ stmt =
   perlPrint "print" <|>
   perlPrint "system_or_die" <|>
   perlPrint "chdir_or_die" <|>
+  perlPrint "die" <|>
   perlPush <|>
+  perlSplit <|>
   (tryStr "else" >> return "else:") <|>
   tern <++> (concatMany $ ass <++> tern) <|>
   (oneOf ";{}" >> return "") <|>
@@ -165,6 +178,9 @@ expr = concatMany1 perlTok
 enc :: Char -> String -> String
 enc c s = c : s ++ [c]
 
+enc2 :: String -> String -> String -> String
+enc2 beg end str = beg ++ str ++ end
+
 perlTok :: P st String
 perlTok =
   tryStr "()" <|>
@@ -172,6 +188,7 @@ perlTok =
   perlMy <|>
   many1 space <|>
   perlqw <|>
+  perlqq <|>
   perlEnv <|>
   comment <|>
   normalStr '"' <|>
@@ -188,6 +205,11 @@ perlqw = do
   a <- perlVar `sepEndBy` (many1 space) <* char ')'
   return $ "[" ++ (intercalate ", " $ map (enc '\'') a) ++ "]"
 
+perlqq :: P st String
+perlqq = do
+  tryStr "qq" >> spaces >> char '('
+  strInnards ')' >>= return . enc2 "qq(\"" "\")"
+
 
 idChar :: P st Char
 idChar = letter <|> digit <|> char '_'
@@ -195,20 +217,50 @@ idChar = letter <|> digit <|> char '_'
 regexpMatch :: String -> P st String
 regexpMatch str =
   (char '/' >> regexpMatch' str '/') <|>
-  ((char 'm' >> anyChar) >>= regexpMatch' str)
+  ((char 'm' >> anyChar) >>= regexpMatch' str) <|>
+  ((char 's' >> anyChar) >>= regexpSubst)
 
 regexpMatch' :: String -> Char -> P st String
 regexpMatch' str c = do
-  s <- strInnards c <* char c
-  return $ "." ++ str ++ "(" ++ s ++ ")"
+  s <- strInnards c
+  return $ "." ++ str ++ "(" ++ enc '"' s ++ ")"
+
+regexpSubst :: Char -> P st String
+regexpSubst '(' = regexpSubst' ')'
+regexpSubst '[' = regexpSubst' ']'
+regexpSubst '{' = regexpSubst' '}'
+regexpSubst c = do
+  s1 <- strInnards c
+  s2 <- strInnards c
+  return $ ".sub(" ++ enc '"' s1 ++ ", " ++ enc '"' s2 ++ ")"
+
+regexpSubst' :: Char -> P st String
+regexpSubst' end = do
+  s1 <- strInnards end
+  beg2 <- spaces >> anyChar
+  s2 <- strInnards $ oppositeBracket beg2
+  return $ ".sub(" ++ enc '"' s1 ++ ", " ++ enc '"' s2 ++ ")"
+
+oppositeBracket '(' = ')'
+oppositeBracket '[' = ']'
+oppositeBracket '{' = '}'
 
 perlVarNoSub :: P st String
 perlVarNoSub = do
   v <- perlVar
   if elem v $ printOps ++ ["sub", "if", "for", "while", "else", "elsif",
-                           "push", "use"]
+                           "push", "use", "die"]
   then parserZero
-  else return v
+  else return $ varOp v
+
+varOp :: String -> String
+varOp "eq" = "=="
+varOp "ne" = "!="
+varOp "ge" = ">="
+varOp "le" = "<="
+varOp "gt" = ">"
+varOp "lt" = "<"
+varOp x = x
 
 printOps = ["print", "system_or_die", "chdir_or_die"]
 
